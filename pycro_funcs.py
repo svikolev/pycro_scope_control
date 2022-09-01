@@ -249,6 +249,10 @@ def set_pre_acq_params(core):
     core.set_shutter_device('ZeissColibri')
     core.set_auto_shutter(False)
 
+def check_acq_configs():
+    """need to add this later"""
+    print("testing reImport")
+
 
 def events_TL_multi_pos(pos_list,offset = 0):
     """ takes list of pos dictionaies and creates a list of TL events
