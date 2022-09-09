@@ -25,20 +25,17 @@ def get_properties_dict(core, dev_name, print_dict=False):
     return prop_dict
 
 
-def upload_triangle_z_seq(core, bridge, pos_sequence, dup_last = False):
-    """ sends sequence to piezo stage
+def upload_triangle_z_seq(core, bridge, pos_sequence):
+    """sends sequence to piezo stage
     needs core, bridge, and pos_sequence list
-    optional: add extra pos at the end
-        since sequencing skips pos when using micromanager event stream
-        alternative is to disarm, then arm the 'ZStage' sequencer"""
+    """
     z_stage = 'ZStage'
     # core.get_focus_device() # just a string of device name, will be 'ZStage'
     # create java obj with the seq
     pos_seq_java = bridge._construct_java_object("mmcorej.DoubleVector")
+
     for i in pos_sequence:
         pos_seq_java.add(float(i))
-    if dup_last:
-        pos_seq_java.add(float(pos_sequence[-1]))
 
     core.set_property(z_stage, "Use Sequence", "Yes")
     core.set_property(z_stage, "Use Fast Sequence", "No")
@@ -46,6 +43,36 @@ def upload_triangle_z_seq(core, bridge, pos_sequence, dup_last = False):
     core.set_property(z_stage, "Use Fast Sequence", "Armed")
 
     return None
+
+
+def upload_triangle_z_seq_plus(core, bridge, pos_sequence, set_zero = False, dup_last = False,dupL_num = 1, dup_first = False, dupF_num = 1):
+    """ ***plus version can send a duplicate at the first or last pos
+    sends sequence to piezo stage
+    needs core, bridge, and pos_sequence list
+    optional: add extra pos at the end
+        since sequencing skips pos when using micromanager event stream
+        alternative is to disarm, then arm the 'ZStage' sequencer"""
+    z_stage = 'ZStage'
+    if set_zero:
+        core.set_position(z_stage)
+    # core.get_focus_device() # just a string of device name, will be 'ZStage'
+    # create java obj with the seq
+    pos_seq_java = bridge._construct_java_object("mmcorej.DoubleVector")
+    if dup_first:
+        for i in range(dupF_num):
+            pos_seq_java.add(float(pos_sequence[0]))
+    for i in pos_sequence:
+        pos_seq_java.add(float(i))
+    if dup_last:
+        for i in range(dupL_num):
+            pos_seq_java.add(float(pos_sequence[-1]))
+
+    core.set_property(z_stage, "Use Sequence", "Yes")
+    core.set_property(z_stage, "Use Fast Sequence", "No")
+    core.load_stage_sequence(z_stage, pos_seq_java)
+    core.set_property(z_stage, "Use Fast Sequence", "Armed")
+
+    return get_all(pos_seq_java)
 
 
 def create_triangle_z_seq_doubles(start_pos, mid_pos, step_size):
@@ -218,13 +245,13 @@ def compute_device_tiles(edge_ar, num_tiles, L_to_R=True, z_mode='inter_center',
 
     return tiles, center_x, center_y
 
-def set_pre_acq_params(core):
+def set_pre_acq_params(core,exposure_t = 30):
     """ acquisition params"""
 
     # set up camera config ###
     core.set_config('Ham_Triggers', 'Out_Exp_Pos')
     core.wait_for_config('Ham_Triggers', 'Out_Exp_Pos')
-    core.set_exposure(30)
+    core.set_exposure(exposure_t)
     # set up camera config ###
 
     # set up TL config ###
@@ -252,7 +279,6 @@ def set_pre_acq_params(core):
 def check_acq_configs():
     """need to add this later"""
     print("testing reImport")
-
 
 def events_TL_multi_pos(pos_list,offset = 0):
     """ takes list of pos dictionaies and creates a list of TL events
@@ -292,3 +318,28 @@ def pos_list_whole_strip(arr_edges, exclude_LofL=None, dev_tiles=32, dev_names_l
             Dev_i = remove_excluded_pos(Dev_i, exclude_LofL[j])
         strip_pos_LofL.append(Dev_i)
     return strip_pos_LofL
+
+
+def create_events_multi_pos_multi_chan_zstack(pos_list, z_idx, num_time_points, RL_chan = '505', include_all = False, z_offset = 0):
+    events = []
+    z_idx_ = z_idx.copy()
+    for pos_num, pos_dict in enumerate(pos_list):
+        if pos_dict['Used'] or include_all:
+            events.append({"axes": {"p": pos_num, "time": 0, "z": 0},
+                           'channel': {'group': 'Channel', 'config': 'TL'},
+                           'x': pos_dict['X'], 'y': pos_dict['Y'], 'z': pos_dict['Z'] + z_offset})
+
+            for i in range(num_time_points):
+                for j in z_idx_:
+                    events.append({"axes": {"p": pos_num, "time": i + 1, "z": j},
+                                   'channel': {'group': 'Channel', 'config': RL_chan}})
+                z_idx_.reverse()
+    return events
+
+
+def reset_piezo(core):
+    core.set_property('ZStage', "Use Fast Sequence", "No")
+    # core.set_property('ZStage', "Use Sequence", "No")
+    core.set_position('ZStage', 0)
+    return core.get_position('ZStage')
+
