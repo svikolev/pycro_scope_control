@@ -1,5 +1,5 @@
 import numpy as np
-
+import time
 
 
 def get_all(java_str_vec):
@@ -130,10 +130,12 @@ def shutter_RL(c,o=False):
     c.set_shutter_open('ZeissReflectedLightShutter', o)
 
 
-def go_to_xyz_careful(core, xyz):
+def go_to_xyz_careful(core, xyz,sleep = 0):
     cur_z = core.get_position('ZeissFocusAxis')
     if xyz[2] > cur_z:
         core.set_xy_position(xyz[0], xyz[1])
+        if sleep > 0:
+            time.sleep(sleep)
         core.wait_for_device('XYStage')
         core.set_position('ZeissFocusAxis', xyz[2])
         core.wait_for_device('ZeissFocusAxis')
@@ -141,6 +143,8 @@ def go_to_xyz_careful(core, xyz):
         core.set_position('ZeissFocusAxis', xyz[2])
         core.wait_for_device('ZeissFocusAxis')
         core.set_xy_position(xyz[0], xyz[1])
+        if sleep > 0:
+            time.sleep(sleep)
         core.wait_for_device('XYStage')
 
 
@@ -255,8 +259,10 @@ def set_pre_acq_params(core,exposure_t = 30):
     # set up camera config ###
 
     # set up TL config ###
-    core.set_config('TL_lamp', 'BF_2_5')
-    core.wait_for_config('TL_lamp', 'BF_2_5')
+    # core.set_config('TL_lamp', 'BF_2_5')
+    # core.wait_for_config('TL_lamp', 'BF_2_5')
+    core.set_config('TL_lamp', 'BF_20x_25v_55na_5bf')
+    core.wait_for_config('TL_lamp', 'BF_20x_25v_55na_5bf')
     # set up TL config ###
 
     # set up cube config ###
