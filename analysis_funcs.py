@@ -9,6 +9,9 @@ from scipy import signal, ndimage
 from sdt import roi
 from matplotlib.path import Path
 import cv2
+import json
+import os
+import tifffile
 
 
 def open_device_dataset(path, fname_base, device=1, time=0, sufix=''):
@@ -48,6 +51,7 @@ def find_roi(im, template, verts):
     """
 
     loc = find_chamber(im, template)
+    verts_adjust = []
 
     for i, v in enumerate(verts):
         x = v[0] + loc[0] - 500
@@ -61,13 +65,38 @@ def find_roi(im, template, verts):
             y = 0
         elif y > 2048:
             y = 2048
-
-        verts[i] = (x, y)
+        verts_adjust.append((x, y))
+        #verts[i] = (x, y)
     codes = [Path.MOVETO]
-    for i in range(len(verts) - 2):
+    for i in range(len(verts_adjust) - 2):
         codes.append(Path.LINETO)
     codes.append(Path.CLOSEPOLY)
-    path = Path(verts, codes)
+    path = Path(verts_adjust, codes)
+
+    return path, loc
+
+def find_roi_from_loc(im,verts,loc):
+    verts_adjust = []
+
+    for i, v in enumerate(verts):
+        x = v[0] + loc[0] - 500
+        if x < 0:
+            x = 0
+        elif x > 2048:
+            x = 2048
+
+        y = v[1] - 500 + loc[1]
+        if y < 0:
+            y = 0
+        elif y > 2048:
+            y = 2048
+        verts_adjust.append((x, y))
+        # verts[i] = (x, y)
+    codes = [Path.MOVETO]
+    for i in range(len(verts_adjust) - 2):
+        codes.append(Path.LINETO)
+    codes.append(Path.CLOSEPOLY)
+    path = Path(verts_adjust, codes)
 
     return path, loc
 
@@ -121,10 +150,10 @@ def z_stack_sharpness_diag(dataset,p,numz,t = 1,c = 1,pool = True,norm = True):
     else:
         return sharpness
 
-def whole_device_sharpness(dataset,device_meta,t=1,c=1,save_meta = True):
+def whole_device_sharpness(dataset,device_meta,t=1,c=1,save_meta = False):
     pos_sharpness = []
     for p in device_meta['pos_list']:
-        pos_sharpness.append(z_stack_sharpness_diag(dataset, p=p, numz=10, t=t, c=c))
+        pos_sharpness.append(z_stack_sharpness_diag(dataset, p=p, numz=10, t=t, c=c).tolist())
     if save_meta:
         device_meta['sharpness'] = pos_sharpness
     return pos_sharpness
@@ -132,9 +161,6 @@ def whole_device_sharpness(dataset,device_meta,t=1,c=1,save_meta = True):
 def create_diagonal_zstrip(dataset,crop_path,delta, worm_n,p,c = 1,t=1):
     length = 2048 + delta * (worm_n - 1)
     strip = np.zeros((2048, length))
-
-    c = 1
-    t = 1
     #sum_projection = np.zeros((crop_im.shape[0], crop_im.shape[1]))
     for i in range(worm_n):
         image = dataset.read_image(channel=c, z=i, time=t, p=p)
@@ -150,6 +176,99 @@ def create_diagonal_zstrip(dataset,crop_path,delta, worm_n,p,c = 1,t=1):
         strip[:rows, i * delta:i * delta + cols] += crop
     return strip
 
-def sum_projection(dataset,start_z,end_z):
-    sum_projection = np.zeros((crop_im.shape[0], crop_im.shape[1]))
-    for z in range(start_z,end_z)
+def sum_projection(dataset,start_z,end_z,p,c = 1,t = 1,crop_path = None):
+    # bounds = crop_path.get_extents().bounds
+    # num_rows = int(bounds[3] - bounds[1])
+    # num_cols = int(bounds[2] - bounds[0])
+    """ start_z is included, end_z is not included"""
+    sum_projection = None #np.zeros((num_rows,num_cols))
+    for z in range(start_z,end_z):
+        if sum_projection is not None:
+            sum_projection += dataset.read_image(channel=c, z=z, time=t, p=p)
+        else:
+            sum_projection = np.array(dataset.read_image(channel=c, z=z, time=t, p=p))
+    if crop_path is not None:
+        return crop_im(sum_projection,crop_path)
+    else:
+        return sum_projection
+
+def max_projection():
+    return None
+
+def find_roi_sum_proj(dataset,center,verts,start_z,end_z,p):
+    BF = np.array(dataset.read_image(channel=0, z=0, time=0, p=p))
+    crop_path, _ = find_roi(BF, center, verts)
+    BF_crop = crop_im(BF,crop_path)
+    s_proj = sum_projection(dataset, start_z, end_z, p, c=1, t=1, crop_path=crop_path)
+    return BF_crop,s_proj
+
+def find_roi_sum_proj_all_worms(dataset,device_meta,center,verts,start_z,end_z,keep_BF = False):
+    num_worms = len(device_meta['pos_list'])
+    pos_stack_RL = np.zeros((num_worms,2048,2048))
+    if keep_BF:
+        pos_stack_BF = np.zeros((num_worms, 2048, 2048))
+    else:
+        pos_stack_BF = None
+    for i,p in enumerate(device_meta['pos_list']):
+        BF = dataset.read_image(channel=0, z=0, time=0, p=p)
+        crop_path, _ = find_roi(BF, center, verts)
+        s_proj = sum_projection(dataset, start_z, end_z, p, c=1, t=1, crop_path=crop_path)
+        num_rows = s_proj.shape[0]
+        num_cols = s_proj.shape[1]
+        pos_stack_RL[i,0:num_rows,0:num_cols] = s_proj
+        if keep_BF:
+            BF_crop = crop_im(BF, crop_path)
+            pos_stack_BF[i, 0:num_rows, 0:num_cols] = BF_crop
+    return pos_stack_RL,pos_stack_BF
+
+
+def create_diagonal_posstrip(stack,delta):
+    worm_n = stack.shape[0]
+    length = 2048 + delta * (worm_n - 1)
+    strip = np.zeros((2048, length))
+    #sum_projection = np.zeros((crop_im.shape[0], crop_im.shape[1]))
+    for i in range(worm_n):
+        image = np.squeeze(stack[i,:,:])
+        rows = image.shape[0]
+        cols = image.shape[1]
+        strip[:rows, i * delta:i * delta + cols] += image
+    return strip
+
+
+def save_diagonal_strip():
+    return None
+
+def compute_back_sub_tot_F(RL_stack,device_meta,thresh):
+    tot_F_sum_proj = []
+    numw = RL_stack.shape[0]
+    for w in range(numw):
+        tot_F_sum_proj.append(np.sum(np.fmax(np.squeeze(RL_stack[w, :, :]) - thresh, 0)))
+    device_meta['tot_F_sum_proj'] = tot_F_sum_proj
+    return tot_F_sum_proj
+
+
+def compute_non_zero_otsu(strip):
+    flat_proj = strip.flatten()
+    non_zero = flat_proj[flat_proj != 0]
+    otsu_thresh = filters.threshold_otsu(non_zero)
+    return otsu_thresh
+
+def save_device_meta_json(device_meta,path,fname):
+    j = json.dumps(device_meta)
+    f = open(os.path.join(path,fname), "w")
+    f.write(j)
+    f.close()
+
+def open_device_meta_json(path):
+    f = open(path, "r")
+    data = json.loads(f.read())
+    f.close()
+    return data
+
+def read_tif_meta(fpath):
+    with tifffile.TiffFile(fpath) as tif:
+        tif_tags = {}
+        for tag in tif.pages[0].tags.values():
+            name, value = tag.name, tag.value
+            tif_tags[name] = value
+    return tif_tags['ImageDescription']
