@@ -75,7 +75,7 @@ def find_roi(im, template, verts):
 
     return path, loc
 
-def find_roi_from_loc(im,verts,loc):
+def find_roi_from_loc(verts,loc):
     verts_adjust = []
 
     for i, v in enumerate(verts):
@@ -100,7 +100,7 @@ def find_roi_from_loc(im,verts,loc):
 
     return path, loc
 
-def crop_im(im,path):
+def crop_im(im,path,**kwargs):
     return roi.PathROI(path)(im)
 
 
@@ -157,6 +157,45 @@ def whole_device_sharpness(dataset,device_meta,t=1,c=1,save_meta = False):
     if save_meta:
         device_meta['sharpness'] = pos_sharpness
     return pos_sharpness
+
+
+def find_loc_all_worms(dataset,device_meta,template,t=0,c=0,save_meta = True):
+    loc_list = []
+    z = 0
+    for p in device_meta['pos_list']:
+        im = dataset.read_image(channel=c, z=z, time=t, p=p)
+        loc = find_chamber(im,template)
+        loc_list.append(loc)
+    if save_meta:
+        device_meta['loc_list'] = loc_list
+    return loc_list
+
+
+
+# def find_loc_path_all_worms(dataset,device_meta,template,verts,t=0,c=0,save_loc = True,save_path = False):
+#     loc_list = []
+#     path_list = []
+#     z = 0
+#     for p in range(device_meta['nump']):
+#         im = dataset.read_image(channel=c, z=z, time=t, p=p)
+#         loc = find_chamber(im,template)
+#         loc_list.append(loc)
+#         path,_ = find_roi_from_loc(verts,loc)
+#         path_list.append()
+#     if save_loc:
+#         device_meta['loc_list'] = loc_list
+#     i
+#
+#     return loc_list,
+
+def get_edof_files(path,timep,device,worm):
+    ## there is typo in the naming of files. file is ouput instead of output
+
+    hmap_file_name = os.path.join(path,"hmap_{}timep_{}dev_{}worm.tif".format(timep,device,worm))
+    output_file_name = os.path.join(path, "ouput_{}timep_{}dev_{}worm.tif".format(timep, device, worm))
+    hmap = tifffile.imread(os.path.join(path, hmap_file_name))
+    output = tifffile.imread(os.path.join(path, output_file_name))
+    return output,hmap
 
 def create_diagonal_zstrip(dataset,crop_path,delta, worm_n,p,c = 1,t=1):
     length = 2048 + delta * (worm_n - 1)
@@ -265,6 +304,18 @@ def open_device_meta_json(path):
     f.close()
     return data
 
+def open_json(path):
+    f = open(path, "r")
+    data = json.loads(f.read())
+    f.close()
+    return data
+
+def save_json(dict,path):
+    j = json.dumps(dict)
+    f = open(path, "w")
+    f.write(j)
+    f.close()
+
 def read_tif_meta(fpath):
     with tifffile.TiffFile(fpath) as tif:
         tif_tags = {}
@@ -272,3 +323,42 @@ def read_tif_meta(fpath):
             name, value = tag.name, tag.value
             tif_tags[name] = value
     return tif_tags['ImageDescription']
+
+def output_nonz0_crop_backsub(output,hmap,otsu_thresh,path):
+    """zeros pixels most in focus at z0,
+    crops the worm channel based on the template match path
+    subracts the background
+    """
+    hmap_nonz0 = hmap>1
+    open_mask = morphology.opening(hmap_nonz0, morphology.square(3))
+    out_open_nonz0 = output*open_mask
+    crop_open_output = crop_im(out_open_nonz0,path)
+    backsub_crop_open_output = np.fmax(crop_open_output.astype("float")-otsu_thresh,0)
+    return backsub_crop_open_output
+
+def output_nonz0_crop_backzero(output,hmap,otsu_thresh,path):
+    """zeros pixels most in focus at z0,
+    crops the worm channel based on the template match path
+    zeros the background pixels with val below the thresh
+    """
+    hmap_nonz0 = hmap>1
+    open_mask = morphology.opening(hmap_nonz0, morphology.square(3))
+    out_open_nonz0 = output*open_mask
+    crop_open_output = crop_im(out_open_nonz0,path)
+    background_mask = crop_open_output>otsu_thresh
+    backzero_crop_open_output = background_mask*crop_open_output
+    #backsub_crop_open_output = np.fmax(crop_open_output.astype("float")-otsu_thresh,0)
+    return backzero_crop_open_output
+
+def conv_8bit_ceiling_bounds(im,ceiling,xrange,yrange):
+    im = np.fmin(im,ceiling)/ceiling*255
+    return im[xrange[0]:xrange[1],yrange[0]:yrange[1]]
+
+def conv_8bit_ceiling(im,ceiling):
+    im = np.fmin(im,ceiling)/ceiling*255
+    return im
+
+def get_outline_xy(path):
+    chamber_outline = np.vstack((path.vertices,path.vertices[0]))
+    xs, ys = zip(*chamber_outline)
+    return xs,ys

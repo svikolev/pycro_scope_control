@@ -1,5 +1,6 @@
 import numpy as np
 import time
+#import analysis_funcs as af
 
 
 def get_all(java_str_vec):
@@ -343,9 +344,45 @@ def create_events_multi_pos_multi_chan_zstack(pos_list, z_idx, num_time_points, 
     return events
 
 
+def create_events_multi_pos_multi_chan_same_zstack(pos_list, num_z, RL_chan = '505', include_all = False, z_offset = 0):
+    events = []
+    for pos_num, pos_dict in enumerate(pos_list):
+        if pos_dict['Used'] or include_all:
+            for i in range(num_z):
+                events.append({"axes": {"p": pos_num, "z": i},
+                               'channel': {'group': 'Channel', 'config': 'TL'},
+                               'x': pos_dict['X'], 'y': pos_dict['Y'], 'z': pos_dict['Z'] + z_offset})
+            for i in range(num_z):
+                events.append({"axes": {"p": pos_num, "z": i},
+                               'channel': {'group': 'Channel', 'config': RL_chan}})
+    return events
+
+
 def reset_piezo(core):
     core.set_property('ZStage', "Use Fast Sequence", "No")
     # core.set_property('ZStage', "Use Sequence", "No")
     core.set_position('ZStage', 0)
     return core.get_position('ZStage')
 
+def adjust_edge_ar(dataset,center,edge_ar,trans_mat):
+    image_stack = np.array(np.squeeze(dataset.as_array()))
+    adjusted_edge_ar = edge_ar.copy()
+    #image_stack.shape
+    for i in range(image_stack.shape[0]):
+        loc = np.array(af.find_chamber(image_stack[i,:,:],center))-500
+        v_move = -np.matmul(trans_mat,loc)
+        adjusted_edge_ar[i][0] +=v_move[0]
+        adjusted_edge_ar[i][1] +=v_move[1]
+    return adjusted_edge_ar
+
+def plot_position_list(edge_ar):
+    z = [p[2] for p in a_edge_ar]
+    x = [p[0] for p in a_edge_ar]
+    y = [p[1] for p in a_edge_ar]
+
+    plt.subplot(1,2,1)
+    plt.plot(x,z)
+    plt.title('X v Z')
+    plt.subplot(1,2,2)
+    plt.title('X v Y')
+    plt.plot(x,y)
