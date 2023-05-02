@@ -25,7 +25,18 @@ def open_device_dataset(path, fname_base, device=1, time=0, sufix=''):
                    'numt': len(dataset.axes['time']),
                    'numc': len(dataset.axes['channel']),
                    'pos_list': list(dataset.axes['p'])}
+    return dataset, device_meta
 
+def open_device_dataset_simp(path,file_name):
+    #file_name = fname_base + "_A{}_{}h_{}1".format(device, time, sufix)
+    data_path = path + "\\" + file_name
+    dataset = Dataset(data_path)
+    device_meta = {'fname': data_path,
+                   'datetime': dataset.summary_metadata['DateAndTime'],
+                   'numz': len(dataset.axes['z']),
+                   'nump': len(dataset.axes['p']),
+                   'numc': len(dataset.axes['channel']),
+                   'pos_list': list(dataset.axes['p'])}
     return dataset, device_meta
 
 
