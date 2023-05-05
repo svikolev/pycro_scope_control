@@ -1687,7 +1687,7 @@ def wait_for_wash_notif(pump_num,wash_num):
 #
 # the following is the class definitions for a Call and for ExpQUE
 #
-# this code is not quite ready for delplyment
+# this code is not quite ready for deployment
 ################################################################################################################
 
 class Call:
@@ -1709,8 +1709,8 @@ class Queue:
         self.thread = None
         self.paused = False
 
-    def get_heap(self):
-        return self.heap
+    # def get_heap(self):
+    #     return self.heap
 
     def log(self, message):
         print(f"[{datetime.datetime.now()}] {message}")
