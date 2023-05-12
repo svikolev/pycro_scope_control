@@ -765,7 +765,7 @@ def get_zseq_sycexp(numz,start_z,step_z,ard_channels,gap_frames = 3):
         if i<len(ard_channels)-1:
             for g in range(gap_frames-1):
                 zseq.append(z_pos[0])
-                zseq.append(z_pos[0])
+                #zseq.append(z_pos[0])
     return zseq
 
 def get_fast_imaging_seq_set_1(ard_channels = [1, 2, 4], ard_wheel = 8,gap_frames = 3,numz = 9,start_z = 0,step_z = 5,pin16 = False):
@@ -1746,7 +1746,7 @@ class Queue:
                     self.log("Queue is empty. Exiting...")
                     break
                 next_timep = self.heap[0].expiry_time
-                wait_time = max(0, next_timep - datetime.datetime.now())
+                wait_time = max(0, (next_timep - datetime.datetime.now()).total_seconds())
                 if self.paused:
                     print('paused, waiting...')
                     self.cv.wait()
@@ -1767,6 +1767,7 @@ class Queue:
                 self.log("Queue started")
 
     def stop(self):
+        ## TO DO: use stop to kill thread
         with self.lock:
             self.thread = None
             self.paused = False
