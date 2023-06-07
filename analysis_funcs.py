@@ -39,6 +39,18 @@ def open_device_dataset_simp(path,file_name):
                    'pos_list': list(dataset.axes['p'])}
     return dataset, device_meta
 
+def open_device_dataset_simp_v2(path,file_name):
+    #file_name = fname_base + "_A{}_{}h_{}1".format(device, time, sufix)
+    data_path = path + "\\" + file_name
+    dataset = Dataset(data_path);
+    device_meta = {'fname': data_path,
+                   'datetime': dataset.summary_metadata['DateAndTime'],
+                   'numz': len(dataset.axes['z']),
+                   'nump': len(dataset.axes['p']),
+                   'numc': len(dataset.axes['c']),
+                   'pos_list': list(dataset.axes['p'])}
+    return dataset, device_meta
+
 
 def find_chamber(wormchamber, template):
     """opn cv template match. takes in the image and the template,
@@ -373,3 +385,199 @@ def get_outline_xy(path):
     chamber_outline = np.vstack((path.vertices,path.vertices[0]))
     xs, ys = zip(*chamber_outline)
     return xs,ys
+
+
+def plot_prediction(im, model):
+    input_im = np.squeeze(im)
+    pred_val = model.predict(input_im, axes='YX')
+    plt.figure(figsize=(16, 8))
+    plt.subplot(1, 2, 1)
+    plt.imshow(input_im, cmap="magma")
+    plt.colorbar(shrink=0.5)
+    plt.title('Input');
+    plt.subplot(1, 2, 2)
+    plt.imshow(pred_val, cmap="magma")
+    plt.colorbar(shrink=0.5)
+    plt.title('Prediction');
+
+
+def get_BF_zstack(dataset, pos, numz=9):
+    c = 0
+    t = None
+    p = pos
+    z_stack = np.zeros((numz, 2048, 2048))
+    for z in range(numz):
+        z_stack[z, :, :] = dataset.read_image(channel=c, z=z, time=t, p=p)
+    return z_stack
+
+
+def get_BF_im(dataset, pos, z, c=0):
+    return dataset.read_image(channel=c, z=z, time=None, p=pos)
+
+
+def get_RL_zstack(dataset, pos, numz=9, zidx=0):
+    c = 1
+    t = None
+    p = pos
+    if zidx == 0:
+        z_stack = np.zeros((numz, 2048, 2048), dtype='float32')
+        for z in range(numz):
+            z_stack[z, :, :] = dataset.read_image(channel=c, z=z, time=t, p=p)
+    elif zidx == 2:
+        z_stack = np.zeros((2048, 2048, numz), dtype='float32')
+        for z in range(numz):
+            z_stack[:, :, z] = dataset.read_image(channel=c, z=z, time=t, p=p)
+    else:
+        raise Exception('Zidx can be 0 or 2')
+    return z_stack
+
+
+def get_zstack(dataset, pos, channel=0, numz=9, zidx=0):
+    """zidx = 0 or 2, is for the return shape to be z,rows,cols or rows,cols,z"""
+    c = channel
+    t = None
+    p = pos
+    if zidx == 0:
+        z_stack = np.zeros((numz, 2048, 2048), dtype='float32')
+        for z in range(numz):
+            z_stack[z, :, :] = dataset.read_image(channel=c, z=z, time=t, p=p)
+    elif zidx == 2:
+        z_stack = np.zeros((2048, 2048, numz), dtype='float32')
+        for z in range(numz):
+            z_stack[:, :, z] = dataset.read_image(channel=c, z=z, time=t, p=p)
+    else:
+        raise Exception('Zidx can be 0 or 2')
+    return z_stack
+
+
+def to_java_ar(ar, dims):
+    """ warning: will not work wityhout jpype"""
+    if np.argmin(ar.shape) != 2:
+        raise Exception('index of zslices must be 2, for example 2048x2048x9')
+    return jpype.JArray(float, dims)(ar)
+
+
+def plot_before_after(b, a, bounds=None, vminmax=None, colorbar=True, figsize=[12, 6], cmap=None):
+    if bounds is None:
+        bounds = [0, b.shape[0], 0, b.shape[1]]
+    if isinstance(vminmax, list):
+        vmin, vmax = (vminmax[0], vminmax[1])
+    elif vminmax == 'before':
+        vmin, vmax = (np.min(b), np.max(b))
+    elif vminmax == 'after':
+        vmin, vmax = (np.min(a), np.max(a))
+    else:
+        vmin, vmax = (None, None)
+
+    plt.figure(figsize=figsize)
+    plt.subplot(1, 2, 1)
+    plt.imshow(b[bounds[0]:bounds[1], bounds[2]:bounds[3]], vmin=vmin, vmax=vmax, cmap=cmap)
+    if colorbar:
+        plt.colorbar(shrink=0.5)
+
+    plt.subplot(1, 2, 2)
+    plt.imshow(a[bounds[0]:bounds[1], bounds[2]:bounds[3]], vmin=vmin, vmax=vmax, cmap=cmap)
+    if colorbar:
+        plt.colorbar(shrink=0.5)
+
+
+def denoise_zstack(model, zstack, zidx=2):
+    output = np.zeros(zstack.shape)
+    if zidx == 2:
+        for z in range(zstack.shape[2]):
+            output[:, :, z] = model.predict(zstack[:, :, z], axes='YX')
+    elif zidx == 0:
+        for z in range(zstack.shape[0]):
+            output[z, :, :] = model.predict(zstack[z, :, :], axes='YX')
+    return output
+
+
+def plot_prediction(im, model):
+    input_im = np.squeeze(im)
+    pred_val = model.predict(input_im, axes='YX')
+    plt.figure(figsize=(16, 8))
+    plt.subplot(1, 2, 1)
+    plt.imshow(input_im, cmap="magma")
+    plt.title('Input_patch');
+    plt.subplot(1, 2, 2)
+    plt.imshow(pred_val, cmap="magma")
+    plt.title('Prediction_patch');
+
+
+def run_edf(edf_tools, edf_params, java_stack, shape=(2048, 2048)):
+    ''' will not work without jpype'''
+
+    Builder, EdfComplexWavelets, PostProcessing = edf_tools
+    im_ware = Builder().create(java_stack)
+    edcw = EdfComplexWavelets(edf_params['daubechielength'], edf_params['nScales'], edf_params['subBandCC'],
+                              edf_params['majCC'])
+    out = edcw.process(im_ware)
+    zeros = np.zeros(shape)
+    buf = jpype.JArray(float, 2)(zeros)
+    out[0].getXY(0, 0, 0, buf)
+    out_edf = np.array(buf)
+
+    reasign = PostProcessing.reassignment(out[1], im_ware)
+    zeros = np.zeros(shape)
+    buf = jpype.JArray(float, 2)(zeros)
+    reasign.getXY(0, 0, 0, buf)
+    out_hmap = np.array(buf)
+    return out_edf, out_hmap
+
+
+def get_hour_time(time_str_list, Sub=True):
+    h_since_E = np.array([time.mktime(time.strptime(h, '%Y/%m/%d %H:%M:%S')) / 60 / 60 for h in time_str_list])
+    if not Sub:
+        return h_since_E
+    else:
+        return h_since_E - h_since_E[0]
+
+
+def get_zstack2(dataset, pos, c=1, channel=0, numz=9, zidx=0):
+    """zidx = 0 or 2, is for the return shape to be z,rows,cols or rows,cols,z"""
+    # c = channel
+    t = None
+    p = pos
+    if zidx == 0:
+        z_stack = np.zeros((numz, 2048, 2048), dtype='float32')
+        for z in range(numz):
+            z_stack[z, :, :] = dataset.read_image(channel=channel, c=c, z=z, time=t, p=p)
+    elif zidx == 2:
+        z_stack = np.zeros((2048, 2048, numz), dtype='float32')
+        for z in range(numz):
+            z_stack[:, :, z] = dataset.read_image(channel=channel, c=c, z=z, time=t, p=p)
+    else:
+        raise Exception('Zidx can be 0 or 2')
+    return z_stack
+
+
+def get_wstack(dataset, pos, channel=0, cidx=[1, 2, 3], numz=9):
+    """zidx = 0 or 2, is for the return shape to be z,rows,cols or rows,cols,z"""
+    # c = channel
+    t = None
+    p = pos
+    # if zidx ==0:
+    z_stack = np.zeros((len(cidx), numz, 2048, 2048), dtype='float32')
+    for ci, c in enumerate(cidx):
+        for z in range(numz):
+            z_stack[ci, z, :, :] = dataset.read_image(channel=channel, c=c, z=z, time=t, p=p)
+    #     elif zidx ==2:
+    #         z_stack = np.zeros((2048,2048,numz),dtype = 'float32')
+    #         for z in range(numz):
+    #             z_stack[:,:,z] = dataset.read_image(channel = channel,c=c,z = z,time = t,p = p)
+    #     else: raise Exception('Zidx can be 0 or 2')
+    return z_stack
+
+
+def create_diagonal_zwall(wstack, mask, chan=0, delta=300):
+    # worm_n = stack.shape[0]
+
+    rows = wstack.shape[2]
+    cols = wstack.shape[3]
+    numz = wstack.shape[1]
+    length = 2048 + delta * (numz - 1)
+    strip = np.zeros((2048, length))
+    for i in range(numz):
+        strip[:rows, i * delta:i * delta + cols] += wstack[chan, i, ...] * mask
+
+    return strip

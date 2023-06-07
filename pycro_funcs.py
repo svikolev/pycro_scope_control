@@ -1768,7 +1768,9 @@ class Queue:
 
     def stop(self):
         ## TO DO: use stop to kill thread
+
         with self.lock:
+            ### to do self.thread.kill
             self.thread = None
             self.paused = False
             self.cv.notify()
