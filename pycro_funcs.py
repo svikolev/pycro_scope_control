@@ -497,12 +497,13 @@ def adjust_edge_ar(dataset,center,edge_ar,trans_mat):
     image_stack = np.array(np.squeeze(dataset.as_array()))
     adjusted_edge_ar = copy.deepcopy(edge_ar)
     #image_stack.shape
+    loc = []
     for i in range(image_stack.shape[0]):
-        loc = np.array(find_chamber(image_stack[i,:,:],center))-500
-        v_move = -np.matmul(trans_mat,loc)
+        loc.append(np.array(find_chamber(image_stack[i,:,:],center))-500)
+        v_move = -np.matmul(trans_mat,loc[i])
         adjusted_edge_ar[i][0] +=v_move[0]
         adjusted_edge_ar[i][1] +=v_move[1]
-    return adjusted_edge_ar
+    return adjusted_edge_ar,loc
 
 def plot_position_list(edge_ar,marker = '*'):
     z = [p[2] for p in edge_ar]
@@ -1255,18 +1256,70 @@ class wspa_strip:
         call this method to add them to the strip as approximate edges"""
         self.approx_edge_array = a_edge_ar
 
-    def run_guided_xy_device_positioning(self,c,file_name = "TL_pre_align_edges_pos"):
+    def run_guided_xy_device_positioning(self,c,file_name = "TL_pre_align_edges_pos", plot_figs = False):
         file_name = file_name+'{}_{}'.format(self.name,self.date)
 
         pre_align_edge_dataset = image_edge_array_xy(c,self.approx_edge_array,self.data_path,file_name)
-        self.xy_align_edge_ar = adjust_edge_ar(pre_align_edge_dataset, self.template_center,
+        self.xy_align_edge_ar,loc_err_ar = adjust_edge_ar(pre_align_edge_dataset, self.template_center,
                                              self.approx_edge_array, self.trans_mat)
 
         # pf.plot_position_list(self.approx_edge_array)
         # pf.plot_position_list(self.xy_align_edge_ar, marker='+')
         # plt.legend('')
         # plt.title('')
+        image_stack = np.array(np.squeeze(pre_align_edge_dataset.as_array()))
+        if plot_figs:
+            """ Plot the centered tile overlaped on the shifted images to confirm template match is working correctly"""
+            plt.figure(figsize=[10, 30])
+            for i in range(image_stack.shape[0]):
+                loc = np.array(loc_err_ar[i])
+                im0 = image_stack[i, :, :]
+                composite = im0.copy()
+                # composite[loc[0]:loc[0]+center.shape[0],loc[1]:loc[1]+center.shape[1]]+=center
+                composite[loc[1]:loc[1] + self.template_center.shape[1], loc[0]:loc[0] + self.template_center.shape[0]] += self.template_center
+                plt.subplot(1, image_stack.shape[0], i + 1)
+                plt.imshow(composite, 'gray')
+                #plt.title('stage shift {}->{}'.format(dxys[i], loc - 500))
+            plt.show()
         return self.xy_align_edge_ar
+
+
+    def plot_dev_positions(self):
+        if self.pos_LofL_s1 is not None:
+            f_pos_list = []
+            for sublist in self.pos_LofL_s1:
+                f_pos_list.extend(sublist)
+            # Create lists to store the x, y, z values and the colors
+            x_values = []
+            y_values = []
+            z_values = []
+            colors = []
+
+            # Extract data from the list of dictionaries
+            for tile in f_pos_list:
+                x_values.append(tile['X'])
+                y_values.append(tile['Y'])
+                z_values.append(tile['Z'])
+                colors.append('red' if tile['Used'] else 'blue')  # Set color based on 'Used' value
+
+            # Create the subplots
+            fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
+            # Plot X vs Y
+            ax1.scatter(x_values, y_values, color=colors)
+            ax1.set_ylabel('Y')
+            ax1.set_title('X vs Y')
+            # Plot X vs Z
+            ax2.scatter(x_values, z_values, color=colors)
+            ax2.set_xlabel('X')
+            ax2.set_ylabel('Z')
+            ax2.set_title('X vs Z')
+            # Adjust spacing between subplots
+            plt.tight_layout()
+            # Show the plot
+            plt.show()
+        else:
+            print('pos LofL is None. no tiles to plot')
+
 
     def run_edge_ar_autoZ_measurement_RtoL(self,c,cut_size = 4,diff = 455.1,chan = 'TL'):
         """ legacy method march 2023"""
