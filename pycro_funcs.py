@@ -341,7 +341,7 @@ def compute_device_tiles(edge_ar, num_tiles, L_to_R=True, z_mode='inter_center',
 
     return tiles, center_x, center_y
 
-def set_pre_acq_params(core,exposure_t = 30,cube = 'semrock_TBP',chan_group = 'Channel',shutter_dev = 'Arduino-shutter',
+def set_pre_acq_params(core,exposure_t = 30,cube = 'semrock_TBP',chan_group = 'Channel',shutter_dev = 'Arduino-Shutter',
                        auto_shutter = False):
     """ acquisition params"""
 
@@ -1259,7 +1259,7 @@ class wspa_strip:
         call this method to add them to the strip as approximate edges"""
         self.approx_edge_array = a_edge_ar
 
-    def run_guided_xy_device_positioning(self,c,file_name = "TL_pre_align_edges_pos", plot_figs = False):
+    def run_guided_xy_device_positioning(self,c,file_name = "TL_pre_align_edges_pos", plot_figs = True):
         file_name = file_name+'{}_{}'.format(self.name,self.date)
 
         pre_align_edge_dataset = image_edge_array_xy(c,self.approx_edge_array,self.data_path,file_name)
@@ -1273,9 +1273,9 @@ class wspa_strip:
         image_stack = np.array(np.squeeze(pre_align_edge_dataset.as_array()))
         if plot_figs:
             """ Plot the centered tile overlaped on the shifted images to confirm template match is working correctly"""
-            plt.figure(figsize=[10, 30])
+            plt.figure(figsize=[20, 30])
             for i in range(image_stack.shape[0]):
-                loc = np.array(loc_err_ar[i])
+                loc = np.array(loc_err_ar[i])+500
                 im0 = image_stack[i, :, :]
                 composite = im0.copy()
                 # composite[loc[0]:loc[0]+center.shape[0],loc[1]:loc[1]+center.shape[1]]+=center
@@ -1303,14 +1303,14 @@ class wspa_strip:
                 x_values.append(tile['X'])
                 y_values.append(tile['Y'])
                 z_values.append(tile['Z'])
-                colors.append('red' if tile['Used'] else 'blue')  # Set color based on 'Used' value
+                colors.append('blue' if tile['Used'] else 'red')  # Set color based on 'Used' value
 
             # Create the subplots
             fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True)
             # Plot X vs Y
             ax1.scatter(x_values, y_values, color=colors)
             ax1.set_ylabel('Y')
-            ax1.set_title('X vs Y')
+            ax1.set_title('X vs Y, (red is NOT USED)')
             # Plot X vs Z
             ax2.scatter(x_values, z_values, color=colors)
             ax2.set_xlabel('X')
@@ -1635,6 +1635,8 @@ def get_steps_switch_source(source = 8,chip = 2,waste = 3,buffer = 4):
              {'type':'pvflow','p':buffer,'r':600,'v':300,'d':'Withdraw','post_wait':4,'status':'clean source, step 3/3 wdr buffer p{}'.format(buffer)}]
     return steps
 
+
+
 def get_steps_notify(message,fname = 'jupyter_com'):
     return [{'type':'notify','com_file':r'C:\Users\LevineLab\Documents\Repos\Pumps\{}'.format(fname),
              'message':'{}'.format(message)}]
@@ -1652,6 +1654,120 @@ def get_approx_times_between_notify(steps):
             cycle_times.append(round(runtime,2))
             runtime = 0
     return cycle_times
+
+
+def get_steps_2port_inject_flow(source1=3, source2=4, chip=6, waste=3, buffer=8):
+    steps = [{'type': 'pvflow', 'p': source1, 'r': 300, 'v': 150, 'd': 'Withdraw', 'post_wait': 4,
+              'status': '1port injection flow, step1/7, withdraw p{}'.format(source1)},
+             {'type': 'pvflow', 'p': source2, 'r': 300, 'v': 150, 'd': 'Withdraw', 'post_wait': 4,
+              'status': '1port injection flow, step1/7, withdraw p{}'.format(source2)},
+             {'type': 'pvflow', 'p': chip, 'r': 200, 'v': 100, 'd': 'Infuse', 'post_wait': 4,
+              'status': '1port injection flow, step2/7 pulse to device p{}'.format(chip)},
+             {'type': 'pvflow', 'p': chip, 'r': 12, 'v': 48, 'd': 'Infuse', 'post_wait': 4,
+              'status': '1port injection flow, step3/7 flow to device p{}'.format(chip)},
+             {'type': 'pvflow', 'p': chip, 'r': 200, 'v': 100, 'd': 'Infuse', 'post_wait': 4,
+              'status': '1port injection flow, step4/7 pulse to device p{}'.format(chip)},
+             {'type': 'pvflow', 'p': chip, 'r': 12, 'v': 48, 'd': 'Infuse', 'post_wait': 4,
+              'status': '1port injection flow, step5/7 flow to device p{}'.format(chip)},
+             {'type': 'pvflow', 'p': waste, 'r': 600, 'v': 300, 'd': 'Infuse', 'post_wait': 4,
+              'status': '1port injection flow, step6/7 to waste p{}'.format(waste)},
+             {'type': 'pvflow', 'p': buffer, 'r': 600, 'v': 300, 'd': 'Withdraw', 'post_wait': 4,
+              'status': '1port injection flow, step7/7 wdr buffer p{}'.format(buffer)}]
+    return steps
+
+
+def create_PV_program_simultenious_species(source1_port=3, source2_port=4, source1_cycles=5, source2_cycles=7):
+    master_steps = []
+    # pump_num = 0
+    """ injection flow cycles from source 1, cycles are about 11.5 minutes"""
+    for cycle in range(source1_cycles):
+        if cycle % 2 == 0:
+            s1 = source1_port
+            s2 = source2_port
+        else:
+            s1 = source2_port
+            s2 = source1_port
+        master_steps += get_steps_2port_inject_flow(source1=s1, source2=s2, chip=6, waste=7, buffer=8)
+        master_steps += get_steps_2port_inject_flow(source1=s2, source2=s1, chip=6, waste=7, buffer=8)
+        master_steps += get_steps_2port_inject_flow(source1=s1, source2=s2, chip=6, waste=7, buffer=8)
+        master_steps += get_steps_2port_inject_flow(source1=s2, source2=s1, chip=6, waste=7, buffer=8)
+        master_steps += get_steps_2port_inject_flow(source1=s1, source2=s2, chip=6, waste=7, buffer=8)
+
+        master_steps += pf.get_steps_notify('starting_wash {}'.format(cycle), fname='jupyter_com_pumps')
+        master_steps += pf.get_steps_wash_chip(chip=6, waste=7, buffer=8)
+
+    """ when switching source, dispense to waste a full ml to clear out remaining species 1,
+    and withdraw from source and dispense to waste to re prime source 2 tubing"""
+    master_steps += pf.get_steps_switch_source(source=source2_port, chip=6, waste=7, buffer=8)
+
+    """ injection flow cycles from source 2, cycles are about 11.5 minutes"""
+    for cycle in range(source1_cycles, source1_cycles + source2_cycles):
+        if cycle % 2 == 0:
+            s1 = source1_port
+            s2 = source2_port
+        else:
+            s1 = source2_port
+            s2 = source1_port
+        master_steps += get_steps_2port_inject_flow(source1=s1, source2=s2, chip=6, waste=7, buffer=8)
+        master_steps += get_steps_2port_inject_flow(source1=s2, source2=s1, chip=6, waste=7, buffer=8)
+        master_steps += get_steps_2port_inject_flow(source1=s1, source2=s2, chip=6, waste=7, buffer=8)
+        master_steps += get_steps_2port_inject_flow(source1=s2, source2=s1, chip=6, waste=7, buffer=8)
+        master_steps += get_steps_2port_inject_flow(source1=s1, source2=s2, chip=6, waste=7, buffer=8)
+
+        master_steps += pf.get_steps_notify('starting_wash {}'.format(cycle), fname='jupyter_com_pumps')
+
+        master_steps += pf.get_steps_wash_chip(chip=6, waste=7, buffer=8)
+    """compute the approximate time for each cycle and add this list as a make schedule step"""
+    cycle_time = pf.get_approx_times_between_notify(master_steps)
+    master_steps = pf.get_steps_make_schedule(cycle_time) + master_steps
+    return master_steps
+
+
+def create_PV_program_simultenious_species_42m_rounds(source1_port=3, source2_port=4, source1_cycles=9,
+                                                      source2_cycles=9):
+    master_steps = []
+    # pump_num = 0
+    """ injection flow cycles from source 1, cycles are about 11.5 minutes"""
+    for cycle in range(source1_cycles):
+        if cycle % 2 == 0:
+            s1 = source1_port
+            s2 = source2_port
+        else:
+            s1 = source2_port
+            s2 = source1_port
+        master_steps += get_steps_2port_inject_flow(source1=s1, source2=s2, chip=6, waste=7, buffer=8)
+        master_steps += get_steps_2port_inject_flow(source1=s2, source2=s1, chip=6, waste=7, buffer=8)
+        master_steps += get_steps_2port_inject_flow(source1=s1, source2=s2, chip=6, waste=7, buffer=8)
+
+        master_steps += pf.get_steps_notify('starting_wash {}'.format(cycle), fname='jupyter_com_pumps')
+        master_steps += pf.get_steps_wash_chip(chip=6, waste=7, buffer=8)
+
+    """ when switching source, dispense to waste a full ml to clear out remaining species 1,
+    and withdraw from source and dispense to waste to re prime source 2 tubing"""
+    master_steps += pf.get_steps_switch_source(source=source2_port, chip=6, waste=7, buffer=8)
+
+    """ injection flow cycles from source 2, cycles are about 11.5 minutes"""
+    for cycle in range(source1_cycles, source1_cycles + source2_cycles):
+        if cycle % 2 == 0:
+            s1 = source1_port
+            s2 = source2_port
+        else:
+            s1 = source2_port
+            s2 = source1_port
+        master_steps += get_steps_2port_inject_flow(source1=s1, source2=s2, chip=6, waste=7, buffer=8)
+        master_steps += get_steps_2port_inject_flow(source1=s2, source2=s1, chip=6, waste=7, buffer=8)
+        master_steps += get_steps_2port_inject_flow(source1=s1, source2=s2, chip=6, waste=7, buffer=8)
+
+        master_steps += pf.get_steps_notify('starting_wash {}'.format(cycle), fname='jupyter_com_pumps')
+        master_steps += pf.get_steps_wash_chip(chip=6, waste=7, buffer=8)
+    """compute the approximate time for each cycle and add this list as a make schedule step"""
+    cycle_time = pf.get_approx_times_between_notify(master_steps)
+    master_steps = pf.get_steps_make_schedule(cycle_time) + master_steps
+    return master_steps
+
+
+# my2species_prog = create_PV_program_simultenious_species()
+my2species_prog = create_PV_program_simultenious_species_42m_rounds()
 
 
 def create_PV_program_sequential_2_species(source1_port = 7,source2_port = 8,source1_cycles = 5,source2_cycles = 5):
