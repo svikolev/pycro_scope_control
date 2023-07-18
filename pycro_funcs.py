@@ -1617,7 +1617,7 @@ def get_steps_1port_inject_flow(source = 7,chip = 2,waste = 3,buffer = 4):
 
 def get_steps_wash_chip(chip = 2,waste = 3,buffer = 4):
     steps = [{'type':'pvflow','p':chip,'r':200,'v':300,'d':'Infuse','post_wait':4,'status':'wash chip,step1/3, pulse buffer to chip p{}'.format(chip)},
-             {'type':'pvflow','p':chip,'r':12,'v':72,'d':'Infuse','post_wait':4,'status':'wash chip,step2/3, flow buffer to chip p{}'.format(chip)},
+             {'type':'pvflow','p':chip,'r':12,'v':48,'d':'Infuse','post_wait':4,'status':'wash chip,step2/3, flow buffer to chip p{}'.format(chip)},
              {'type':'pvflow','p':buffer,'r':600,'v':372,'d':'Withdraw','post_wait':4,'status':'wash chip,step3/3, refill buffer p{}'.format(buffer)}]
     return steps
 
@@ -1676,6 +1676,34 @@ def get_steps_2port_inject_flow(source1=3, source2=4, chip=6, waste=3, buffer=8)
     return steps
 
 
+def get_steps_pulse_port(port=1, vol=30, rate=300, direction='Infuse'):
+    steps = [{'type': 'pvflow', 'p': port, 'r': rate, 'v': vol, 'd': 'Infuse', 'post_wait': 4,
+              'status': 'pulse_port p{}'.format(port)}]
+    return steps
+
+
+def create_PV_program_1h_alternate_2_species(source1_port=3, source2_port=4, cycles=12):
+    master_steps = []
+    # pump_num = 0
+    """ injection flow cycles from source 1, cycles are about 11.5 minutes"""
+    for cycle in range(cycles):
+        for inject in range(5):
+            master_steps += get_steps_1port_inject_flow(source=source1_port, chip=6, waste=7, buffer=8)
+        master_steps += get_steps_pulse_port(port=source1_port, vol=30, rate=300, direction='Infuse')
+        master_steps += get_steps_notify('starting_wash {}'.format(cycle), fname='jupyter_com_pumps')
+        master_steps += get_steps_wash_chip(chip=6, waste=7, buffer=8)
+
+        for inject in range(5):
+            master_steps += get_steps_1port_inject_flow(source=source2_port, chip=6, waste=7, buffer=8)
+        master_steps += get_steps_pulse_port(port=source2_port, vol=30, rate=300, direction='Infuse')
+        master_steps += get_steps_notify('starting_wash {}'.format(cycle), fname='jupyter_com_pumps')
+        master_steps += get_steps_wash_chip(chip=6, waste=7, buffer=8)
+
+    """compute the approximate time for each cycle and add this list as a make schedule step"""
+    cycle_time = get_approx_times_between_notify(master_steps)
+    master_steps = get_steps_make_schedule(cycle_time) + master_steps
+    return master_steps
+
 def create_PV_program_simultenious_species(source1_port=3, source2_port=4, source1_cycles=5, source2_cycles=7):
     master_steps = []
     # pump_num = 0
@@ -1693,12 +1721,12 @@ def create_PV_program_simultenious_species(source1_port=3, source2_port=4, sourc
         master_steps += get_steps_2port_inject_flow(source1=s2, source2=s1, chip=6, waste=7, buffer=8)
         master_steps += get_steps_2port_inject_flow(source1=s1, source2=s2, chip=6, waste=7, buffer=8)
 
-        master_steps += pf.get_steps_notify('starting_wash {}'.format(cycle), fname='jupyter_com_pumps')
-        master_steps += pf.get_steps_wash_chip(chip=6, waste=7, buffer=8)
+        master_steps += get_steps_notify('starting_wash {}'.format(cycle), fname='jupyter_com_pumps')
+        master_steps += get_steps_wash_chip(chip=6, waste=7, buffer=8)
 
     """ when switching source, dispense to waste a full ml to clear out remaining species 1,
     and withdraw from source and dispense to waste to re prime source 2 tubing"""
-    master_steps += pf.get_steps_switch_source(source=source2_port, chip=6, waste=7, buffer=8)
+    master_steps += get_steps_switch_source(source=source2_port, chip=6, waste=7, buffer=8)
 
     """ injection flow cycles from source 2, cycles are about 11.5 minutes"""
     for cycle in range(source1_cycles, source1_cycles + source2_cycles):
@@ -1714,12 +1742,12 @@ def create_PV_program_simultenious_species(source1_port=3, source2_port=4, sourc
         master_steps += get_steps_2port_inject_flow(source1=s2, source2=s1, chip=6, waste=7, buffer=8)
         master_steps += get_steps_2port_inject_flow(source1=s1, source2=s2, chip=6, waste=7, buffer=8)
 
-        master_steps += pf.get_steps_notify('starting_wash {}'.format(cycle), fname='jupyter_com_pumps')
+        master_steps += get_steps_notify('starting_wash {}'.format(cycle), fname='jupyter_com_pumps')
 
-        master_steps += pf.get_steps_wash_chip(chip=6, waste=7, buffer=8)
+        master_steps += get_steps_wash_chip(chip=6, waste=7, buffer=8)
     """compute the approximate time for each cycle and add this list as a make schedule step"""
-    cycle_time = pf.get_approx_times_between_notify(master_steps)
-    master_steps = pf.get_steps_make_schedule(cycle_time) + master_steps
+    cycle_time = get_approx_times_between_notify(master_steps)
+    master_steps = get_steps_make_schedule(cycle_time) + master_steps
     return master_steps
 
 
@@ -1739,12 +1767,12 @@ def create_PV_program_simultenious_species_42m_rounds(source1_port=3, source2_po
         master_steps += get_steps_2port_inject_flow(source1=s2, source2=s1, chip=6, waste=7, buffer=8)
         master_steps += get_steps_2port_inject_flow(source1=s1, source2=s2, chip=6, waste=7, buffer=8)
 
-        master_steps += pf.get_steps_notify('starting_wash {}'.format(cycle), fname='jupyter_com_pumps')
-        master_steps += pf.get_steps_wash_chip(chip=6, waste=7, buffer=8)
+        master_steps += get_steps_notify('starting_wash {}'.format(cycle), fname='jupyter_com_pumps')
+        master_steps += get_steps_wash_chip(chip=6, waste=7, buffer=8)
 
     """ when switching source, dispense to waste a full ml to clear out remaining species 1,
     and withdraw from source and dispense to waste to re prime source 2 tubing"""
-    master_steps += pf.get_steps_switch_source(source=source2_port, chip=6, waste=7, buffer=8)
+    master_steps += get_steps_switch_source(source=source2_port, chip=6, waste=7, buffer=8)
 
     """ injection flow cycles from source 2, cycles are about 11.5 minutes"""
     for cycle in range(source1_cycles, source1_cycles + source2_cycles):
@@ -1758,16 +1786,16 @@ def create_PV_program_simultenious_species_42m_rounds(source1_port=3, source2_po
         master_steps += get_steps_2port_inject_flow(source1=s2, source2=s1, chip=6, waste=7, buffer=8)
         master_steps += get_steps_2port_inject_flow(source1=s1, source2=s2, chip=6, waste=7, buffer=8)
 
-        master_steps += pf.get_steps_notify('starting_wash {}'.format(cycle), fname='jupyter_com_pumps')
-        master_steps += pf.get_steps_wash_chip(chip=6, waste=7, buffer=8)
+        master_steps += get_steps_notify('starting_wash {}'.format(cycle), fname='jupyter_com_pumps')
+        master_steps += get_steps_wash_chip(chip=6, waste=7, buffer=8)
     """compute the approximate time for each cycle and add this list as a make schedule step"""
-    cycle_time = pf.get_approx_times_between_notify(master_steps)
-    master_steps = pf.get_steps_make_schedule(cycle_time) + master_steps
+    cycle_time = get_approx_times_between_notify(master_steps)
+    master_steps = get_steps_make_schedule(cycle_time) + master_steps
     return master_steps
 
 
 # my2species_prog = create_PV_program_simultenious_species()
-my2species_prog = create_PV_program_simultenious_species_42m_rounds()
+#my2species_prog = create_PV_program_simultenious_species_42m_rounds()
 
 
 def create_PV_program_sequential_2_species(source1_port = 7,source2_port = 8,source1_cycles = 5,source2_cycles = 5):
