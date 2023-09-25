@@ -5,6 +5,6 @@ A library of python functions for controling micro manager to run the wormspa ex
 pycro_funcs contains:
 1) functions for controlling core
 2) wspa_strip class definition
-3) 
+3) mycall and myqueue class definitions
 
 Must use config file: v3...
