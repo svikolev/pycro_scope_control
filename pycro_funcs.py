@@ -978,8 +978,10 @@ def image_strip(c,b,strip, fname, display, zseq, start_z=0, numz=9,path = r"C:\U
                 e = generate_events_at_pos_fast_z_fast_c3(pos, numz, pos_num=pos_idx, gap_frames=3)
                 events += e
                 pos_idx += 1
-
-        file_name = fname + '_dev{}'.format(strip.device_names_list[d_num])  # "pre_exp_B{}".format(dev)
+        dev_name = strip.device_names_list[d_num]
+        file_name = fname + '_dev{}'.format(dev_name)  # "pre_exp_B{}".format(dev)
+        strip.image_fnames['{}'.format(dev_name)].append(file_name)
+        strip.pickle_save()
         with Acquisition(directory=path, name=file_name, show_display=display, debug=False) as acq:
             acq.acquire(events)
 
@@ -1196,6 +1198,21 @@ class wspa_strip:
         self.xyz_align_out_chan_ar = None
         self.bestz = None
         self.pos_LofL_s1 = None
+        self.exp_name = None
+        self.num_pos_used = []
+        self.start_pos = None
+        self.safe_z = None
+        self.image_fnames = {}
+
+    def set_safez(self,z):
+        self.safe_z = z
+
+    def go_to_safez(self,c):
+        if self.safe_z is not None:
+            c.set_property('ZeissFocusAxis', 'Position', self.safe_z)
+            time.sleep(2)
+        else:
+            raise TypeError('safe_z is none')
 
     def set_nump_per_dev(self,num):
         """ default is 32 which is set at init but this can be changed"""
@@ -1206,6 +1223,7 @@ class wspa_strip:
 
     def set_device_names(self,names_list):
         self.device_names_list = names_list
+        self.image_fnames = {n:[] for n in names_list}
 
     def run_tile_allignment(self,c,xyz_pos,plot_figs = True):
         """ calls the non class method 'setup_20x_diag_tile_alignment'
@@ -1466,6 +1484,14 @@ class wspa_strip:
         self.pos_LofL_s1 = pos_list_whole_strip(self.xyz_adj_edge_ar, exclude_LofL=self.excluded_pos, dev_tiles=self.pos_per_dev,
                                               dev_names_list=self.device_names_list)
         self.start_pos = self.xyz_adj_edge_ar[0]
+
+        self.num_pos_used = []
+        for d in self.pos_LofL_s1:
+            c = 0
+            for p in d:
+                if p['Used']:
+                    c += 1
+            self.num_pos_used.append(c)
         return self.pos_LofL_s1
 
     def save_edge_ar(self):
@@ -1490,7 +1516,9 @@ class wspa_strip:
                 out_dict[key] = 'null'
         with open(f_name, 'w') as f:
             json.dump(out_dict, f)
-    def pickle_save(self,f_name):
+    def pickle_save(self,f_name = None):
+        if f_name is None:
+            f_name = os.path.join(self.data_path,'strip_{}_{}.pkl'.format(self.name,self.date))
         with open(f_name, 'wb') as f:
             pickle.dump(self, f)
 
@@ -1682,6 +1710,7 @@ def get_steps_pulse_port(port=1, vol=30, rate=300, direction='Infuse'):
     return steps
 
 
+
 def create_PV_program_1h_alternate_2_species(source1_port=3, source2_port=4, cycles=12):
     master_steps = []
     # pump_num = 0
@@ -1841,149 +1870,47 @@ def write_pump_program_json(master_steps,file_name=None):
         json.dump(pump_prog, f, indent=4)
 
 
-def wait_for_wash_notif(pump_num,wash_num):
-    step_num = wash_num  # The step number you're waiting for
-    time_limit = datetime.timedelta(seconds=90)
-    #filename = 'notification.txt'
-    #pump_num = 0
-    filename = r'C:\Users\LevineLab\Documents\Repos\Pumps\jupyter_com_pumps_{}'.format(pump_num)
-
-    def parse_notification(line):
-        parts = line.strip().split()
-        timestamp = datetime.datetime.fromisoformat(parts[0]+" "+parts[1])
-        #name = parts[1]
-        step = int(parts[-1])
-
-        return timestamp, step
-
-    found_notif = False
-    while not found_notif:
-        with open(filename, 'r') as f:
-            lines = f.readlines()
-
-        for line in lines:
-            timestamp, step = parse_notification(line)
-            print(step)
-
-            if step == step_num:
-                time_elapsed = datetime.datetime.now() - timestamp
-                remaining_time = time_limit - time_elapsed
-                found_notif = True
-                print("found line")
-                if remaining_time > datetime.timedelta(0):
-                    print('waiting..',remaining_time.total_seconds())
-                    time.sleep(remaining_time.total_seconds())
-
-                # Execute the code you want to run after the notification
-                print("Received notification from script1. Continuing...")
-                break
-        else:
-            print('sleeping')
-            time.sleep(30)
-
-
-###########################################################################################################
+# def wait_for_wash_notif(pump_num,wash_num):
+#     step_num = wash_num  # The step number you're waiting for
+#     time_limit = datetime.timedelta(seconds=90)
+#     #filename = 'notification.txt'
+#     #pump_num = 0
+#     filename = r'C:\Users\LevineLab\Documents\Repos\Pumps\jupyter_com_pumps_{}'.format(pump_num)
 #
+#     def parse_notification(line):
+#         parts = line.strip().split()
+#         timestamp = datetime.datetime.fromisoformat(parts[0]+" "+parts[1])
+#         #name = parts[1]
+#         step = int(parts[-1])
 #
-# the following is the class definitions for a Call and for ExpQUE
+#         return timestamp, step
 #
-# this code is not quite ready for deployment
-################################################################################################################
+#     found_notif = False
+#     while not found_notif:
+#         with open(filename, 'r') as f:
+#             lines = f.readlines()
+#
+#         for line in lines:
+#             timestamp, step = parse_notification(line)
+#             print(step)
+#
+#             if step == step_num:
+#                 time_elapsed = datetime.datetime.now() - timestamp
+#                 remaining_time = time_limit - time_elapsed
+#                 found_notif = True
+#                 print("found line")
+#                 if remaining_time > datetime.timedelta(0):
+#                     print('waiting..',remaining_time.total_seconds())
+#                     time.sleep(remaining_time.total_seconds())
+#
+#                 # Execute the code you want to run after the notification
+#                 print("Received notification from script1. Continuing...")
+#                 break
+#         else:
+#             print('sleeping')
+#             time.sleep(30)
 
-class Call:
-    def __init__(self, name, expiry_time, func, args):
-        self.name = name
-        self.expiry_time = expiry_time
-        self.func = func
-        self.args = args
-
-    def __lt__(self, other):
-        return self.expiry_time < other.expiry_time
 
 
-class Queue:
-    def __init__(self):
-        self.heap = []
-        self.lock = threading.Lock()
-        self.cv = threading.Condition(self.lock)
-        self.thread = None
-        self.paused = False
 
-    # def get_heap(self):
-    #     return self.heap
 
-    def log(self, message):
-        print(f"[{datetime.datetime.now()}] {message}")
-
-    def add_call(self, call):
-        with self.lock:
-            heapq.heappush(self.heap, call)
-            self.cv.notify()
-            self.log("adding call {},for time {}".format(call.name, call.expiry_time))
-
-    def remove_call(self, call):
-        with self.lock:
-            self.heap.remove(call)
-            heapq.heapify(self.heap)
-            self.cv.notify()
-            self.log("removing call")
-
-    def edit_call(self, call, new_call):
-        """ not tested """
-        with self.lock:
-            self.remove_call(call)
-            self.add_call(new_call)
-            self.log("editing call")
-
-    def get_heap(self):
-        with self.lock:
-            return heapq.nsmallest(len(self.heap), self.heap)
-
-    def run(self):
-        while True:
-            with self.lock:
-                if not self.heap:
-                    self.log("Queue is empty. Exiting...")
-                    break
-                next_timep = self.heap[0].expiry_time
-                wait_time = max(0, (next_timep - datetime.datetime.now()).total_seconds())
-                if self.paused:
-                    print('paused, waiting...')
-                    self.cv.wait()
-                    print('resumed')
-                elif wait_time == 0:
-                    next_call = heapq.heappop(self.heap)
-                    self.log("Executing call to {} with arguments {}".format(next_call.func.__name__, next_call.name))
-                    next_call.func(*next_call.args)
-                else:
-                    self.log("Waiting until {} for next call".format(next_timep))
-                    self.cv.wait(wait_time)
-
-    def start(self):
-        with self.lock:
-            if not self.thread:
-                self.thread = threading.Thread(target=self.run)
-                self.thread.start()
-                self.log("Queue started")
-
-    def stop(self):
-        ## TO DO: use stop to kill thread
-
-        with self.lock:
-            ### to do self.thread.kill
-            self.thread = None
-            self.paused = False
-            self.cv.notify()
-            self.log("Queue stopped")
-
-    def pause(self):
-        with self.lock:
-            self.paused = True
-            self.cv.notify()
-            self.log("Queue paused")
-
-    def resume(self):
-        with self.lock:
-            self.paused = False
-            self.cv.notify()
-            self.log("Queue Resumed")

@@ -14,6 +14,11 @@ import os
 import tifffile
 
 
+import struct
+import numpy
+import tifffile
+
+
 def open_device_dataset(path, fname_base, device=1, time=0, sufix=''):
     file_name = fname_base + "_A{}_{}h_{}1".format(device, time, sufix)
     data_path = path + "\\" + file_name
@@ -123,8 +128,9 @@ def find_roi_from_loc(verts,loc):
 
     return path, loc
 
-def crop_im(im,path,**kwargs):
-    return roi.PathROI(path)(im)
+def crop_im(im,path,crop = True,**kwargs):
+    # todo: set crop = False so thet image stays fullsize
+    return roi.PathROI(path)(im,crop = crop)
 
 
 def measure_sharpness(im,mediansize = 3,filt = None, pool = True):
@@ -287,7 +293,7 @@ def find_roi_sum_proj_all_worms(dataset,device_meta,center,verts,start_z,end_z,k
 def create_diagonal_posstrip(stack,delta):
     worm_n = stack.shape[0]
     length = 2048 + delta * (worm_n - 1)
-    strip = np.zeros((2048, length))
+    strip = np.zeros((2048, length),dtype = np.uint16)
     #sum_projection = np.zeros((crop_im.shape[0], crop_im.shape[1]))
     for i in range(worm_n):
         image = np.squeeze(stack[i,:,:])
@@ -401,13 +407,13 @@ def plot_prediction(im, model):
     plt.title('Prediction');
 
 
-def get_BF_zstack(dataset, pos, numz=9):
+def get_BF_zstack(dataset,pos,numz = 9):
     c = 0
     t = None
     p = pos
-    z_stack = np.zeros((numz, 2048, 2048))
+    z_stack = np.zeros((numz,2048,2048))
     for z in range(numz):
-        z_stack[z, :, :] = dataset.read_image(channel=c, z=z, time=t, p=p)
+        z_stack[z,:,:] = dataset.read_image(channel = c,z = z,time = t,p = p)
     return z_stack
 
 
@@ -551,13 +557,13 @@ def get_zstack2(dataset, pos, c=1, channel=0, numz=9, zidx=0):
     return z_stack
 
 
-def get_wstack(dataset, pos, channel=0, cidx=[1, 2, 3], numz=9):
+def get_wstack(dataset, pos, channel=0, cidx=[1, 2, 3], numz=9,dtype = 'float32'):
     """zidx = 0 or 2, is for the return shape to be z,rows,cols or rows,cols,z"""
     # c = channel
     t = None
     p = pos
     # if zidx ==0:
-    z_stack = np.zeros((len(cidx), numz, 2048, 2048), dtype='float32')
+    z_stack = np.zeros((len(cidx), numz, 2048, 2048), dtype=dtype)
     for ci, c in enumerate(cidx):
         for z in range(numz):
             z_stack[ci, z, :, :] = dataset.read_image(channel=channel, c=c, z=z, time=t, p=p)
@@ -568,6 +574,9 @@ def get_wstack(dataset, pos, channel=0, cidx=[1, 2, 3], numz=9):
     #     else: raise Exception('Zidx can be 0 or 2')
     return z_stack
 
+
+def get_crop_mask(path,shape = (2048,2048)):
+    return crop_im(np.ones(shape,np.uint8),path)
 
 def create_diagonal_zwall(wstack, mask, chan=0, delta=300):
     # worm_n = stack.shape[0]
@@ -581,3 +590,241 @@ def create_diagonal_zwall(wstack, mask, chan=0, delta=300):
         strip[:rows, i * delta:i * delta + cols] += wstack[chan, i, ...] * mask
 
     return strip
+
+
+def get_1w_all_times_max_proj(worm_meta, numc=3,start_z = [0,0,0]):
+    allt_wstack_proj = np.zeros((len(worm_meta['file_name_list']), numc, 2048, 2048),dtype=np.uint16)
+
+    for timep, file_name in enumerate(worm_meta['file_name_list']):
+        dataset, device_meta = open_device_dataset_simp_v2(worm_meta['raw_path'], file_name);
+        worm_number = worm_meta['pos_idx']
+        wstack = get_wstack(dataset, worm_number, channel=0, cidx=[1, 2, 3], numz=9)
+
+        allt_wstack_proj[timep, 0, ...] = np.max(wstack[0, start_z[0]:, ...], axis=0)
+        allt_wstack_proj[timep, 1, ...] = np.max(wstack[1, start_z[1]:, ...], axis=0)
+        allt_wstack_proj[timep, 2, ...] = np.max(wstack[2, start_z[2]:, ...], axis=0)
+
+    return allt_wstack_proj
+
+def get_1w_all_times_max_proj_BF_only(worm_meta, numc=1,start_z = [0]):
+    allt_wstack_proj = np.zeros((len(worm_meta['file_name_list']), numc, 2048, 2048),dtype=np.uint16)
+
+    for timep, file_name in enumerate(worm_meta['file_name_list']):
+        dataset, device_meta = open_device_dataset_simp_v2(worm_meta['raw_path'], file_name);
+        worm_number = worm_meta['pos_idx']
+        wstack = get_wstack(dataset, worm_number, channel=0, cidx=[1], numz=9)
+
+        allt_wstack_proj[timep, 0, ...] = np.max(wstack[0, start_z[0]:, ...], axis=0)
+    return allt_wstack_proj
+
+
+def get_1w_all_times_denoised_max_proj(worm_meta, numc=3, model_1=None, model_2=None):
+    """ WITH DENOISING"""
+
+    allt_wstack_proj = np.zeros((len(worm_meta['file_name_list']), numc, 2048, 2048), dtype=np.uint16)
+
+    for timep, file_name in enumerate(worm_meta['file_name_list']):
+        dataset, device_meta = open_device_dataset_simp_v2(worm_meta['raw_path'], file_name);
+        worm_number = worm_meta['pos_idx']
+        wstack = get_wstack(dataset, worm_number, channel=0, cidx=[1, 2, 3], numz=9)
+
+        allt_wstack_proj[timep, 0, ...] = wstack[0, 2, ...]
+        allt_wstack_proj[timep, 1, ...] = np.max(denoise_zstack(model_1, wstack[1, :, ...], zidx=0)
+                                                 , axis=0)
+        allt_wstack_proj[timep, 2, ...] = np.max(denoise_zstack(model_2, wstack[2, :, ...], zidx=0)
+                                                 , axis=0)
+
+    return allt_wstack_proj
+
+
+def get_cropped_all_times_max_proj(all_t_stack, center, verts, worm_meta=None):
+    cropped_all_t_stack = np.zeros(all_t_stack.shape, dtype=np.uint16)
+    for timep in range(all_t_stack.shape[0]):
+        path, _ = find_roi(all_t_stack[timep, 0, ...], center, verts)
+        xmin, xmax = (int(np.min(path.vertices[:, 0])), int(np.max(path.vertices[:, 0])))
+        ymin, ymax = (int(np.min(path.vertices[:, 1])), int(np.max(path.vertices[:, 1])))
+        for cc in range(all_t_stack.shape[1]):
+            cropped_all_t_stack[timep, cc, ymin:ymax, xmin:xmax] = crop_im(all_t_stack[timep, cc, ...], path)
+    return cropped_all_t_stack
+
+def get_cropped_all_times_max_proj_v2(all_t_stack, center, verts, worm_meta=None):
+    cropped_all_t_stack = np.zeros(all_t_stack.shape, dtype=np.uint16)
+    for timep in range(all_t_stack.shape[0]):
+        path, _ = find_roi(all_t_stack[timep, 0, ...], center, verts)
+        # xmin, xmax = (int(np.min(path.vertices[:, 0])), int(np.max(path.vertices[:, 0])))
+        # ymin, ymax = (int(np.min(path.vertices[:, 1])), int(np.max(path.vertices[:, 1])))
+        for cc in range(all_t_stack.shape[1]):
+            cropped_all_t_stack[timep, cc, ...] = crop_im(all_t_stack[timep, cc, ...], path,crop = False)
+    return cropped_all_t_stack
+
+def get_cropped_all_times_max_proj_v3(all_t_stack, center, verts, worm_meta=None):
+    cropped_all_t_stack = np.zeros(all_t_stack.shape, dtype=np.uint16)
+    path = None
+    for timep in range(all_t_stack.shape[0]):
+        if path is None:
+            path, _ = find_roi(all_t_stack[timep, 0, ...], center, verts)
+        for cc in range(all_t_stack.shape[1]):
+            cropped_all_t_stack[timep, cc, ...] = crop_im(all_t_stack[timep, cc, ...], path,crop = False)
+    return cropped_all_t_stack
+
+
+def get_cropped_all_times_max_proj_v4(all_t_stack, center, verts, worm_meta=None):
+    path, _ = find_roi(all_t_stack[0, 0, ...], center, verts)
+    c_mask_c = np.ones((2048, 2048), dtype=np.uint16)
+    c_mask_c = crop_im(c_mask_c, path, crop=False)
+    all_t_stack = all_t_stack * c_mask_c[np.newaxis, np.newaxis, ...]
+    return all_t_stack
+
+
+def get_cropped_all_times_max_proj_back_sub_first_median(all_t_stack, center, verts, worm_meta=None):
+    """ WITH BACKGROUND SUBTRACTION USING THE MEDIAN PIX INTENSITY OF WORM CROP PRE EXPERIMENT"""
+    cropped_all_t_stack = np.zeros(all_t_stack.shape, dtype=np.uint16)
+    med_background = None
+    for timep in range(all_t_stack.shape[0]):
+        path, _ = find_roi(all_t_stack[timep, 0, ...], center, verts)
+        xmin, xmax = (int(np.min(path.vertices[:, 0])), int(np.max(path.vertices[:, 0])))
+        ymin, ymax = (int(np.min(path.vertices[:, 1])), int(np.max(path.vertices[:, 1])))
+        for cc in range(all_t_stack.shape[1]):
+            crop = crop_im(all_t_stack[timep, cc, ...], path)
+            if cc > 0:
+                if med_background is None:
+                    med_background = np.median(crop[np.nonzero(crop)])
+                crop = np.fmax(0, crop - med_background)
+            cropped_all_t_stack[timep, cc, ymin:ymax, xmin:xmax] = crop
+    return cropped_all_t_stack
+
+
+def create_diagonal_posstrip_multi_chan(stack, delta=300):
+    worm_n = stack.shape[0]
+    numc = stack.shape[1]
+    length = 2048 + delta * (worm_n - 1)
+    strip = np.zeros((numc, 2048, length), dtype=np.uint16)
+    # sum_projection = np.zeros((crop_im.shape[0], crop_im.shape[1]))
+    for cc in range(numc):
+        for i in range(worm_n):
+            image = np.squeeze(stack[i, cc, :, :])
+            rows = image.shape[0]
+            cols = image.shape[1]
+            strip[cc, :rows, i * delta:i * delta + cols] += image
+    return strip
+
+
+def imagej_metadata_tags(metadata, byteorder):
+    """Return IJMetadata and IJMetadataByteCounts tags from metadata dict.
+
+    The tags can be passed to the TiffWriter.save function as extratags.
+
+    """
+    header = [{'>': b'IJIJ', '<': b'JIJI'}[byteorder]]
+    bytecounts = [0]
+    body = []
+
+    def writestring(data, byteorder):
+        return data.encode('utf-16' + {'>': 'be', '<': 'le'}[byteorder])
+
+    def writedoubles(data, byteorder):
+        return struct.pack(byteorder + ('d' * len(data)), *data)
+
+    def writebytes(data, byteorder):
+        return data.tobytes()
+
+    metadata_types = (
+        ('Info', b'info', 1, writestring),
+        ('Labels', b'labl', None, writestring),
+        ('Ranges', b'rang', 1, writedoubles),
+        ('LUTs', b'luts', None, writebytes),
+        ('Plot', b'plot', 1, writebytes),
+        ('ROI', b'roi ', 1, writebytes),
+        ('Overlays', b'over', None, writebytes))
+
+    for key, mtype, count, func in metadata_types:
+        if key not in metadata:
+            continue
+        if byteorder == '<':
+            mtype = mtype[::-1]
+        values = metadata[key]
+        if count is None:
+            count = len(values)
+        else:
+            values = [values]
+        header.append(mtype + struct.pack(byteorder + 'I', count))
+        for value in values:
+            data = func(value, byteorder)
+            body.append(data)
+            bytecounts.append(len(data))
+
+    body = b''.join(body)
+    header = b''.join(header)
+    data = header + body
+    bytecounts[0] = len(header)
+    bytecounts = struct.pack(byteorder + ('I' * len(bytecounts)), *bytecounts)
+    return ((50839, 'B', len(data), data, True),
+            (50838, 'I', len(bytecounts) // 4, bytecounts, True))
+
+
+def get_grayredgreen_lut():
+    grays = numpy.tile(numpy.arange(256, dtype='uint8'), (3, 1))
+    red = numpy.zeros((3, 256), dtype='uint8')
+    red[0] = numpy.arange(256, dtype='uint8')
+    green = numpy.zeros((3, 256), dtype='uint8')
+    green[1] = numpy.arange(256, dtype='uint8')
+    return [grays, red, green]
+
+def get_grayredgreenblue_lut():
+    grays = numpy.tile(numpy.arange(256, dtype='uint8'), (3, 1))
+    red = numpy.zeros((3, 256), dtype='uint8')
+    red[0] = numpy.arange(256, dtype='uint8')
+    green = numpy.zeros((3, 256), dtype='uint8')
+    green[1] = numpy.arange(256, dtype='uint8')
+    blue = numpy.zeros((3, 256), dtype='uint8')
+    blue[2] = numpy.arange(256, dtype='uint8')
+    return [grays, red, green,blue]
+
+def get_grayredgreenbluemagenta_lut():
+    grays = numpy.tile(numpy.arange(256, dtype='uint8'), (3, 1))
+    red = numpy.zeros((3, 256), dtype='uint8')
+    red[0] = numpy.arange(256, dtype='uint8')
+    green = numpy.zeros((3, 256), dtype='uint8')
+    green[1] = numpy.arange(256, dtype='uint8')
+    blue = numpy.zeros((3, 256), dtype='uint8')
+    blue[2] = numpy.arange(256, dtype='uint8')
+    magenta = numpy.zeros((3, 256), dtype='uint8')
+    magenta[0] = numpy.arange(256, dtype='uint8')
+    magenta[2] = numpy.arange(256, dtype='uint8')
+    return [grays, red, green,blue,magenta]
+
+# def get_ranges(array):
+#     if len(array.shape)==4:
+#         mx = np.max(array,axis = (-4,-2,-1)).astype('float')
+#         mn = np.min(array,axis = (-4,-2,-1)).astype('float')
+#     elif len(array.shape)==3:
+#         mx = np.max(array,axis = (-2,-1)).astype('float')
+#         mn = np.min(array,axis = (-2,-1)).astype('float')
+#     else:
+#         raise IndexError('array must have 3 or 4 inedex dims to use get ranges')
+#     ranges = [[n,x] for n,x in zip(mn,mx)]
+#     print(type(ranges[0][0]))
+#     return ranges
+
+
+def save_tiff_ijmeta_grayredgreen(fname, array):
+    # ranges does not work, some problem with write doubles so i cnat base in a list of lists with min max for each channel
+    # try:
+    #     ijtags = imagej_metadata_tags({'LUTs': get_grayredgreen_lut(),
+    #                                    'Ranges':get_ranges(array)}, '>')
+    # except IndexError:
+    #    print('could not call get_rnages. saving without ranges'
+    ijtags = imagej_metadata_tags({'LUTs': get_grayredgreen_lut()}, '>')
+    tifffile.imsave(fname, array, byteorder='>', imagej=True,
+                    metadata={'mode': 'color'}, extratags=ijtags)
+
+def save_tiff_ijmeta_grayredgreenblue(fname, array):
+    ijtags = imagej_metadata_tags({'LUTs': get_grayredgreenblue_lut()}, '>')
+    tifffile.imsave(fname, array, byteorder='>', imagej=True,
+                    metadata={'mode': 'color'}, extratags=ijtags)
+
+
+def save_tiff_ijmeta_grayredgreenbluemagenta(fname, array):
+    ijtags = imagej_metadata_tags({'LUTs': get_grayredgreenbluemagenta_lut()}, '>')
+    tifffile.imsave(fname, array, byteorder='>', imagej=True,
+                    metadata={'mode': 'color'}, extratags=ijtags)
